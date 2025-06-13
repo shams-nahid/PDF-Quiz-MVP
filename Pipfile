@@ -15,6 +15,7 @@ pypdf = "*"
 fastapi = "*"
 uvicorn = "*"
 python-multipart = "*"
+jinja2 = "*"
 
 [dev-packages]
 

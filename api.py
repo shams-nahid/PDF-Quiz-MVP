@@ -1,12 +1,15 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, Request, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 import tempfile
 import os
 from main import PDFQuizGenerator
 from typing import List
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse
 
 # Create FastAPI app instance
 app = FastAPI(title="PDF Quiz Generator API", version="1.0.0")
+templates = Jinja2Templates(directory="templates")
 
 # Configuration constants
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
@@ -138,12 +141,7 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "PDF Quiz Generator API is running"}
 
-@app.get("/")
-async def root():
-    """Root endpoint with API information"""
-    return {
-        "message": "PDF Quiz Generator API",
-        "version": "1.0.0",
-        "docs": "/docs",
-        "health": "/health"
-    }
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
