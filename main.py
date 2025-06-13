@@ -18,6 +18,77 @@ from langchain.prompts import PromptTemplate
 # Load environment variables
 load_dotenv()
 
+# Add this after your imports, before the class definition
+LANGUAGE_PROMPTS = {
+    "english": """You are an expert quiz creator. Generate multiple-choice questions from the following content.
+
+    Requirements:
+    - Create {num_questions} questions
+    - Each question should have 4 options (A, B, C, D)
+    - Only one correct answer per question
+    - Focus on key concepts and important facts
+    - Vary difficulty levels
+    - Include the correct answer
+
+    Content:
+    {content}
+
+    Format your response as:
+    Question 1: [question text]
+    A) [option]
+    B) [option]
+    C) [option]
+    D) [option]
+    Correct Answer: [letter]
+
+    [Continue for all questions]""",
+
+    "japanese": """あなたは専門のクイズ作成者です。以下の英語の内容を理解し、完全に日本語で選択式問題を作成してください。
+
+        重要: 問題文、選択肢、番号、すべてを日本語で作成してください。英語は一切使用しないでください。
+
+        要件:
+        - {num_questions}問の問題を作成
+        - 各問題に4つの選択肢（ア、イ、ウ、エ）
+        - 各問題につき正解は1つのみ
+        - 重要な概念と事実に焦点を当てる
+        - 難易度を変える
+        - 正解を含める
+        - 内容を日本語に翻訳して理解しやすい問題を作成
+
+        内容:
+        {content}
+
+        以下の形式で回答してください（すべて日本語で）:
+        問題１: [日本語の問題文]
+        ア) [日本語の選択肢]
+        イ) [日本語の選択肢]
+        ウ) [日本語の選択肢]
+        エ) [日本語の選択肢]
+        正解: [ア/イ/ウ/エ]
+
+        [続けて全ての問題]"""
+}
+
+# Add this after LANGUAGE_PROMPTS definition
+SUPPORTED_LANGUAGES = ["english", "japanese"]
+
+def validate_languages(languages):
+    """Validate and filter supported languages"""
+    if not languages:
+        return ["english"]  # Default fallback
+    
+    # Filter out invalid languages
+    valid_languages = [lang.lower() for lang in languages if lang.lower() in SUPPORTED_LANGUAGES]
+    
+    # If no valid languages, fallback to default
+    if not valid_languages:
+        print("⚠️  No valid languages found, defaulting to English")
+        return ["english"]
+    
+    print(f"✅ Valid languages: {valid_languages}")
+    return valid_languages
+
 class PDFQuizGenerator:
     def extract_pdf_text(self, pdf_path):
         """Extract text from PDF using LangChain's PyPDFLoader"""
@@ -112,60 +183,46 @@ class PDFQuizGenerator:
             print(f"❌ Content retrieval error: {e}")
             return []
 
-    def generate_quiz(self, content_chunks, num_questions=5):
-        """Generate quiz from content chunks using LangChain"""
+    def generate_quiz(self, content_chunks, num_questions=5, languages=["japanese"]):
+        """Generate quiz from content chunks using LangChain for multiple languages"""
         try:
+            # Validate languages
+            languages = validate_languages(languages)
             combined_content = "\n\n".join(content_chunks)
-            
-            # Create prompt template
-            prompt_template = PromptTemplate(
-                input_variables=["content", "num_questions"],
-                template="""You are an expert quiz creator. Generate multiple-choice questions from the following content.
-
-    Requirements:
-    - Create {num_questions} questions
-    - Each question should have 4 options (A, B, C, D)
-    - Only one correct answer per question
-    - Focus on key concepts and important facts
-    - Vary difficulty levels
-    - Include the correct answer
-
-    Content:
-    {content}
-
-    Format your response as:
-    Question 1: [question text]
-    A) [option]
-    B) [option]
-    C) [option]
-    D) [option]
-    Correct Answer: [letter]
-
-    [Continue for all questions]"""
-            )
             
             # Create ChatOpenAI instance
             llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3)
             
-            # Format prompt
-            formatted_prompt = prompt_template.format(
-                content=combined_content,
-                num_questions=num_questions
-            )
+            results = {}
             
-            print(f"🔄 Generating {num_questions} quiz questions...")
+            for language in languages:
+                print(f"🔄 Generating {language} quiz with {num_questions} questions...")
+
+                # Get the prompt template for this language
+                prompt_template = PromptTemplate(
+                    input_variables=["content", "num_questions"],
+                    template=LANGUAGE_PROMPTS[language]
+                )
+                
+                # Format prompt
+                formatted_prompt = prompt_template.format(
+                    content=combined_content,
+                    num_questions=num_questions
+                )
+                
+                # Generate quiz for this language
+                response = llm.invoke(formatted_prompt)
+                results[language] = response.content
+                
+                print(f"✅ {language} quiz generated successfully")
             
-            # Generate quiz
-            response = llm.invoke(formatted_prompt)
-            
-            print(f"✅ Quiz generated successfully")
-            return response.content
+            return {"quizzes": results}
             
         except Exception as e:
             print(f"❌ Quiz generation error: {e}")
             return None
 
-    def process_pdf_to_quiz(self, pdf_path, num_questions=5):
+    def process_pdf_to_quiz(self, pdf_path, num_questions=5, languages=["japanese"]):
         """Complete pipeline: PDF to Quiz using LangChain"""
         print("=" * 50)
         print("🚀 PDF QUIZ GENERATOR MVP (LangChain)")
@@ -193,14 +250,14 @@ class PDFQuizGenerator:
             return None
         
         # Generate quiz
-        quiz = self.generate_quiz(relevant_content, num_questions)
+        quiz = self.generate_quiz(relevant_content, num_questions, languages=languages)
         
         return quiz
 
 # Test complete pipeline
 if __name__ == "__main__":
     generator = PDFQuizGenerator()
-    quiz = generator.process_pdf_to_quiz("sample.pdf", num_questions=3)
+    quiz = generator.process_pdf_to_quiz("sample.pdf", num_questions=2, languages=["japanese"])
     
     if quiz:
         print("\n" + "=" * 50)

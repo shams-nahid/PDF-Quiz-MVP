@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import tempfile
 import os
 from main import PDFQuizGenerator
+from typing import List
 
 # Create FastAPI app instance
 app = FastAPI(title="PDF Quiz Generator API", version="1.0.0")
@@ -20,7 +21,8 @@ class QuizRequest(BaseModel):
 @app.post("/generate-quiz")
 async def generate_quiz(
     file: UploadFile = File(..., description="PDF file to generate quiz from"),
-    num_questions: int = Form(2, description="Number of questions to generate (1-10)")
+    num_questions: int = Form(2, description="Number of questions to generate (1-10)"),
+    languages: List[str] = Form(["english", "japanese"], description="Languages for quiz generation (english, japanese)")
 ):
     """
     Step 5: Generate quiz from uploaded PDF with robust error handling
@@ -74,7 +76,7 @@ async def generate_quiz(
         generator = PDFQuizGenerator()
         
         # Generate quiz
-        quiz_result = generator.process_pdf_to_quiz(temp_file_path, num_questions=num_questions)
+        quiz_result = generator.process_pdf_to_quiz(temp_file_path, num_questions=num_questions, languages=languages)
         
         if not quiz_result:
             raise HTTPException(
@@ -90,6 +92,7 @@ async def generate_quiz(
                 "source_filename": file.filename,
                 "file_size_bytes": len(content),
                 "num_questions_requested": num_questions,
+                "languages_generated": languages,
                 "content_type": file.content_type
             }
         }
