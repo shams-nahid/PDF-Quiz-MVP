@@ -15,3 +15,5 @@ Api will be available,
 ```bash
 http://localhost:8000/docs
 ```
+
+Deployed to `render.com`, available at `https://pdf-quiz-mvp.onrender.com/`
