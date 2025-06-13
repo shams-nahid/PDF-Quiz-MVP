@@ -6,9 +6,14 @@ Converts PDF documents into multiple-choice quizzes using AI
 
 from dotenv import load_dotenv
 import os
-from PyPDF2 import PdfReader
 from openai import OpenAI
 from pinecone import Pinecone
+from langchain_community.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings
+from langchain_pinecone import PineconeVectorStore
+from langchain_openai import ChatOpenAI
+from langchain.prompts import PromptTemplate
 
 # Load environment variables
 load_dotenv()
@@ -20,121 +25,105 @@ class PDFQuizGenerator:
         self.pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
         self.index = self.pc.Index(os.getenv('PINECONE_INDEX_NAME'))
         
+    
     def extract_pdf_text(self, pdf_path):
-        """Extract text from PDF file"""
+        """Extract text from PDF using LangChain's PyPDFLoader"""
         try:
-            reader = PdfReader(pdf_path)
-            text = ""
-            print(f"📄 Processing PDF with {len(reader.pages)} pages...")
+            loader = PyPDFLoader(pdf_path)
+            documents = loader.load()
             
-            for page in reader.pages:
-                text += page.extract_text() + "\n"
+            print(f"📄 Processing PDF with {len(documents)} pages...")
             
-            print(f"✅ Extracted {len(text)} characters")
-            return text.strip()
+            # Combine all pages into single text string
+            full_text = ""
+            for doc in documents:
+                full_text += doc.page_content + "\n"
+            
+            print(f"✅ Extracted {len(full_text)} characters")
+            return full_text.strip()
             
         except Exception as e:
             print(f"❌ PDF extraction error: {e}")
             return None
-    
-    def create_chunks(self, text, chunk_size=250, overlap=50):
-        """Split text into overlapping chunks"""
-        words = text.split()
-        chunks = []
-        
-        start = 0
-        chunk_id = 0
-        
-        while start < len(words):
-            end = min(start + chunk_size, len(words))
-            chunk_words = words[start:end]
-            chunk_text = " ".join(chunk_words)
-            
-            chunks.append({
-                "id": f"chunk_{chunk_id:03d}",
-                "text": chunk_text
-            })
-            
-            start = end - overlap
-            chunk_id += 1
-            
-            if end >= len(words):
-                break
-        
-        print(f"✅ Created {len(chunks)} text chunks")
-        return chunks
-    
-    def generate_embeddings(self, chunks):
-        """Generate embeddings for text chunks"""
+
+    def create_chunks(self, text):
+        """Create chunks using LangChain's RecursiveCharacterTextSplitter"""
         try:
-            texts = [chunk["text"] for chunk in chunks]
-            
-            print(f"🔄 Generating embeddings...")
-            response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=texts
+            text_splitter = RecursiveCharacterTextSplitter(
+                chunk_size=300,
+                chunk_overlap=50,
+                length_function=len,
+                separators=["\n\n", "\n", ". ", " ", ""]
             )
             
-            embeddings = [data.embedding for data in response.data]
+            chunks = text_splitter.split_text(text)
+            print(f"✅ Created {len(chunks)} chunks")
             
-            for chunk, embedding in zip(chunks, embeddings):
-                chunk["embedding"] = embedding
-            
-            print(f"✅ Generated embeddings for {len(chunks)} chunks")
             return chunks
             
         except Exception as e:
-            print(f"❌ Embedding generation error: {e}")
-            return None
-    
-    def store_in_pinecone(self, chunks, source_name):
-        """Store chunks with embeddings in Pinecone"""
+            print(f"❌ Chunking error: {e}")
+            return []
+
+    def generate_embeddings(self, chunks):
+        """Generate embeddings using LangChain's OpenAIEmbeddings"""
         try:
-            vectors = []
-            for chunk in chunks:
-                vector = {
-                    "id": f"{source_name}_{chunk['id']}",
-                    "values": chunk["embedding"],
-                    "metadata": {
-                        "text": chunk["text"],
-                        "source": source_name
-                    }
-                }
-                vectors.append(vector)
+            embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
+            embeddings = embeddings_model.embed_documents(chunks)
             
-            upsert_response = self.index.upsert(vectors=vectors)
-            print(f"✅ Stored {upsert_response['upserted_count']} chunks in Pinecone")
-            return True
+            print(f"✅ Generated embeddings for {len(chunks)} chunks")
+            return embeddings
+            
+        except Exception as e:
+            print(f"❌ Embedding error: {e}")
+            return []
+
+    def store_in_pinecone(self, chunks, embeddings=None):
+        """Store chunks in Pinecone using LangChain's PineconeVectorStore"""
+        try:
+            # Create embeddings model
+            embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
+            
+            # Get index name from environment variable
+            index_name = os.getenv('PINECONE_INDEX_NAME')
+            
+            # Create vector store and add documents
+            vector_store = PineconeVectorStore.from_texts(
+                texts=chunks,
+                embedding=embeddings_model,
+                index_name=index_name
+            )
+            
+            print(f"✅ Stored {len(chunks)} chunks in Pinecone")
+            return vector_store
             
         except Exception as e:
             print(f"❌ Pinecone storage error: {e}")
-            return False
-    
+            return None
+
     def retrieve_relevant_content(self, query="important concepts key facts", top_k=3, source_filter=None):
-        """Retrieve most relevant chunks for quiz generation"""
+        """Retrieve most relevant chunks for quiz generation using LangChain"""
         try:
-            # Generate query embedding
-            query_response = self.openai_client.embeddings.create(
-                model="text-embedding-ada-002",
-                input=[query]
-            )
-            query_embedding = query_response.data[0].embedding
+            # Create embeddings model
+            embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
             
-            # Search Pinecone
-            search_response = self.index.query(
-                vector=query_embedding,
-                top_k=top_k * 2,  # Get more to filter
-                include_metadata=True
+            # Get index name from environment variable
+            index_name = os.getenv('PINECONE_INDEX_NAME')
+            
+            # Create vector store
+            vector_store = PineconeVectorStore(
+                index_name=index_name,
+                embedding=embeddings_model
             )
             
-            # Filter results by source if specified
-            relevant_chunks = []
-            for match in search_response['matches']:
-                if source_filter and source_filter not in match['id']:
-                    continue
-                if len(relevant_chunks) >= top_k:
-                    break
-                relevant_chunks.append(match['metadata']['text'])
+            # Create retriever
+            retriever = vector_store.as_retriever(search_kwargs={"k": top_k})
+            
+            # Query for relevant content
+            relevant_docs = retriever.invoke(query)
+            
+            # Extract text content
+            relevant_chunks = [doc.page_content for doc in relevant_docs]
             
             print(f"✅ Retrieved {len(relevant_chunks)} relevant chunks")
             return relevant_chunks
@@ -142,54 +131,64 @@ class PDFQuizGenerator:
         except Exception as e:
             print(f"❌ Content retrieval error: {e}")
             return []
-    
+
     def generate_quiz(self, content_chunks, num_questions=5):
-        """Generate quiz from content chunks"""
+        """Generate quiz from content chunks using LangChain"""
         try:
             combined_content = "\n\n".join(content_chunks)
             
-            prompt = f"""You are an expert quiz creator. Generate multiple-choice questions from the following content.
+            # Create prompt template
+            prompt_template = PromptTemplate(
+                input_variables=["content", "num_questions"],
+                template="""You are an expert quiz creator. Generate multiple-choice questions from the following content.
 
-Requirements:
-- Create {num_questions} questions
-- Each question should have 4 options (A, B, C, D)
-- Only one correct answer per question
-- Focus on key concepts and important facts
-- Vary difficulty levels
-- Include the correct answer
+    Requirements:
+    - Create {num_questions} questions
+    - Each question should have 4 options (A, B, C, D)
+    - Only one correct answer per question
+    - Focus on key concepts and important facts
+    - Vary difficulty levels
+    - Include the correct answer
 
-Content:
-{combined_content}
+    Content:
+    {content}
 
-Format your response as:
-Question 1: [question text]
-A) [option]
-B) [option]
-C) [option]
-D) [option]
-Correct Answer: [letter]
+    Format your response as:
+    Question 1: [question text]
+    A) [option]
+    B) [option]
+    C) [option]
+    D) [option]
+    Correct Answer: [letter]
 
-[Continue for all questions]"""
-
-            print(f"🔄 Generating {num_questions} quiz questions...")
-            response = self.openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=2000,
-                temperature=0.3
+    [Continue for all questions]"""
             )
             
+            # Create ChatOpenAI instance
+            llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.3)
+            
+            # Format prompt
+            formatted_prompt = prompt_template.format(
+                content=combined_content,
+                num_questions=num_questions
+            )
+            
+            print(f"🔄 Generating {num_questions} quiz questions...")
+            
+            # Generate quiz
+            response = llm.invoke(formatted_prompt)
+            
             print(f"✅ Quiz generated successfully")
-            return response.choices[0].message.content
+            return response.content
             
         except Exception as e:
             print(f"❌ Quiz generation error: {e}")
             return None
-    
+
     def process_pdf_to_quiz(self, pdf_path, num_questions=5):
-        """Complete pipeline: PDF to Quiz"""
+        """Complete pipeline: PDF to Quiz using LangChain"""
         print("=" * 50)
-        print("🚀 PDF QUIZ GENERATOR MVP")
+        print("🚀 PDF QUIZ GENERATOR MVP (LangChain)")
         print("=" * 50)
         
         # Extract PDF text
@@ -199,20 +198,16 @@ Correct Answer: [letter]
         
         # Create chunks
         chunks = self.create_chunks(text)
-        
-        # Generate embeddings
-        chunks_with_embeddings = self.generate_embeddings(chunks)
-        if not chunks_with_embeddings:
+        if not chunks:
             return None
         
         # Store in Pinecone
-        source_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        stored = self.store_in_pinecone(chunks_with_embeddings, source_name)
-        if not stored:
+        vector_store = self.store_in_pinecone(chunks)
+        if not vector_store:
             return None
         
         # Retrieve relevant content
-        relevant_content = self.retrieve_relevant_content(source_filter=source_name)
+        relevant_content = self.retrieve_relevant_content()
         if not relevant_content:
             print("❌ No relevant content found")
             return None
@@ -221,6 +216,7 @@ Correct Answer: [letter]
         quiz = self.generate_quiz(relevant_content, num_questions)
         
         return quiz
+
 
 def main():
     """Main function"""
@@ -241,5 +237,17 @@ def main():
     else:
         print("❌ Failed to generate quiz")
 
+# Test complete pipeline
 if __name__ == "__main__":
-    main()
+    generator = PDFQuizGenerator()
+    quiz = generator.process_pdf_to_quiz("sample.pdf", num_questions=3)
+    
+    if quiz:
+        print("\n" + "=" * 50)
+        print("📝 COMPLETE LANGCHAIN QUIZ")
+        print("=" * 50)
+        print(quiz)
+        print("\n" + "=" * 50)
+        print("✅ LangChain integration complete!")
+    else:
+        print("❌ Failed to generate quiz")
