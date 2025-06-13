@@ -19,13 +19,6 @@ from langchain.prompts import PromptTemplate
 load_dotenv()
 
 class PDFQuizGenerator:
-    def __init__(self):
-        """Initialize the PDF Quiz Generator"""
-        self.openai_client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-        self.pc = Pinecone(api_key=os.getenv('PINECONE_API_KEY'))
-        self.index = self.pc.Index(os.getenv('PINECONE_INDEX_NAME'))
-        
-    
     def extract_pdf_text(self, pdf_path):
         """Extract text from PDF using LangChain's PyPDFLoader"""
         try:
@@ -63,19 +56,6 @@ class PDFQuizGenerator:
             
         except Exception as e:
             print(f"❌ Chunking error: {e}")
-            return []
-
-    def generate_embeddings(self, chunks):
-        """Generate embeddings using LangChain's OpenAIEmbeddings"""
-        try:
-            embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
-            embeddings = embeddings_model.embed_documents(chunks)
-            
-            print(f"✅ Generated embeddings for {len(chunks)} chunks")
-            return embeddings
-            
-        except Exception as e:
-            print(f"❌ Embedding error: {e}")
             return []
 
     def store_in_pinecone(self, chunks, embeddings=None):
@@ -216,26 +196,6 @@ class PDFQuizGenerator:
         quiz = self.generate_quiz(relevant_content, num_questions)
         
         return quiz
-
-
-def main():
-    """Main function"""
-    # Initialize generator
-    generator = PDFQuizGenerator()
-    
-    # Process PDF and generate quiz
-    pdf_path = "sample.pdf"
-    quiz = generator.process_pdf_to_quiz(pdf_path, num_questions=5)
-    
-    if quiz:
-        print("\n" + "=" * 50)
-        print("📝 GENERATED QUIZ")
-        print("=" * 50)
-        print(quiz)
-        print("\n" + "=" * 50)
-        print("✅ Quiz generation complete!")
-    else:
-        print("❌ Failed to generate quiz")
 
 # Test complete pipeline
 if __name__ == "__main__":
