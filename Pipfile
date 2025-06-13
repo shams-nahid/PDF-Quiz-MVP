@@ -12,6 +12,9 @@ langchain-openai = "*"
 langchain-pinecone = "*"
 langchain-community = "*"
 pypdf = "*"
+fastapi = "*"
+uvicorn = "*"
+python-multipart = "*"
 
 [dev-packages]
 
