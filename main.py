@@ -14,6 +14,8 @@ from langchain_openai import OpenAIEmbeddings
 from langchain_pinecone import PineconeVectorStore
 from langchain_openai import ChatOpenAI
 from langchain.prompts import PromptTemplate
+import hashlib
+import time
 
 # Load environment variables
 load_dotenv()
@@ -77,8 +79,6 @@ SUPPORTED_LANGUAGES = ["english", "japanese"]
 # Add this helper function to generate unique namespaces
 def generate_namespace(pdf_path):
     """Generate a unique namespace for each PDF document"""
-    import hashlib
-    import time
     
     # Get file name without path
     filename = os.path.basename(pdf_path)
@@ -90,7 +90,6 @@ def generate_namespace(pdf_path):
     
     # Create readable namespace
     namespace = f"pdf_{namespace_hash}"
-    print(f"📁 Using namespace: {namespace} for {filename}")
     return namespace
 
 def validate_languages(languages):
@@ -103,10 +102,8 @@ def validate_languages(languages):
     
     # If no valid languages, fallback to default
     if not valid_languages:
-        print("⚠️  No valid languages found, defaulting to English")
         return ["english"]
     
-    print(f"✅ Valid languages: {valid_languages}")
     return valid_languages
 
 class PDFQuizGenerator:
@@ -116,18 +113,14 @@ class PDFQuizGenerator:
             loader = PyPDFLoader(pdf_path)
             documents = loader.load()
             
-            print(f"📄 Processing PDF with {len(documents)} pages...")
-            
             # Combine all pages into single text string
             full_text = ""
             for doc in documents:
                 full_text += doc.page_content + "\n"
             
-            print(f"✅ Extracted {len(full_text)} characters")
             return full_text.strip()
             
         except Exception as e:
-            print(f"❌ PDF extraction error: {e}")
             return None
 
     def create_chunks(self, text):
@@ -141,12 +134,10 @@ class PDFQuizGenerator:
             )
             
             chunks = text_splitter.split_text(text)
-            print(f"✅ Created {len(chunks)} chunks")
             
             return chunks
             
         except Exception as e:
-            print(f"❌ Chunking error: {e}")
             return []
 
     # Updated store_in_pinecone method
@@ -164,21 +155,19 @@ class PDFQuizGenerator:
                 texts=chunks,
                 embedding=embeddings_model,
                 index_name=index_name,
-                namespace=namespace  # 🔑 KEY CHANGE: Add namespace isolation
+                namespace=namespace  # KEY CHANGE: Add namespace isolation
             )
             
-            print(f"✅ Stored {len(chunks)} chunks in Pinecone namespace: {namespace}")
             return vector_store
         
         except Exception as e:
-            print(f"❌ Pinecone storage error: {e}")
             return None
 
     # Update your retrieve_relevant_content method (if you're still using it)
     def retrieve_relevant_content(self, query="important concepts key facts", top_k=3, namespace=None):
         """Retrieve most relevant chunks for quiz generation using LangChain with namespace isolation"""
         try:
-            # 🔑 FIX: Use text-embedding-ada-002 to match your Pinecone index
+            # FIX: Use text-embedding-ada-002 to match your Pinecone index
             embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
             
             # Get index name from environment variable
@@ -200,11 +189,9 @@ class PDFQuizGenerator:
             # Extract text content
             relevant_chunks = [doc.page_content for doc in relevant_docs]
             
-            print(f"✅ Retrieved {len(relevant_chunks)} relevant chunks from namespace: {namespace}")
             return relevant_chunks
             
         except Exception as e:
-            print(f"❌ Content retrieval error: {e}")
             return []
 
     def generate_quiz(self, content_chunks, num_questions=5, languages=["japanese"]):
@@ -220,8 +207,6 @@ class PDFQuizGenerator:
             results = {}
             
             for language in languages:
-                print(f"🔄 Generating {language} quiz with {num_questions} questions...")
-
                 # Get the prompt template for this language
                 prompt_template = PromptTemplate(
                     input_variables=["content", "num_questions"],
@@ -237,21 +222,15 @@ class PDFQuizGenerator:
                 # Generate quiz for this language
                 response = llm.invoke(formatted_prompt)
                 results[language] = response.content
-                
-                print(f"✅ {language} quiz generated successfully")
             
             return {"quizzes": results}
             
         except Exception as e:
-            print(f"❌ Quiz generation error: {e}")
             return None
 
     # Replace your process_pdf_to_quiz method with this debug version
     def process_pdf_to_quiz(self, pdf_path, num_questions=5, languages=["japanese"]):
         """Complete pipeline: PDF to Quiz using LangChain with namespace isolation"""
-        print("=" * 50)
-        print("🚀 PDF QUIZ GENERATOR MVP (LangChain)")
-        print("=" * 50)
         
         # Generate unique namespace for this PDF
         namespace = generate_namespace(pdf_path)
@@ -266,18 +245,13 @@ class PDFQuizGenerator:
         if not chunks:
             return None
         
-        # 🔧 DEBUG: Show what we're storing
-        print(f"🔧 DEBUG: First chunk preview: {chunks[0][:100]}...")
-        
         # Store in Pinecone with namespace
         vector_store = self.store_in_pinecone(chunks, namespace=namespace)
         if not vector_store:
             return None
         
-        # 🔧 DEBUG: Try multiple retrieval approaches
+        # Try multiple retrieval approaches
         try:
-            print("🔍 Testing different retrieval methods...")
-            
             # Method 1: Try similarity search with different queries
             test_queries = [
                 "important concepts key facts",
@@ -290,66 +264,35 @@ class PDFQuizGenerator:
             relevant_content = []
             
             for i, query in enumerate(test_queries):
-                print(f"🔧 Test {i+1}: Query '{query[:20]}...'")
                 try:
                     # Try direct similarity search
                     results = vector_store.similarity_search(query, k=3)
                     if results:
                         relevant_content = [doc.page_content for doc in results]
-                        print(f"   ✅ SUCCESS: Found {len(relevant_content)} chunks")
                         break
-                    else:
-                        print(f"   ❌ No results")
                 except Exception as e:
-                    print(f"   ❌ Error: {e}")
+                    continue
             
             # Method 2: If nothing worked, try without query
             if not relevant_content:
-                print("🔧 Trying retrieval without specific query...")
                 try:
                     retriever = vector_store.as_retriever(search_kwargs={"k": 3})
                     docs = retriever.invoke("")
                     relevant_content = [doc.page_content for doc in docs]
-                    print(f"✅ Fallback retrieval found {len(relevant_content)} chunks")
                 except Exception as e:
-                    print(f"❌ Fallback failed: {e}")
+                    pass
             
             # Method 3: If still nothing, just use first few chunks
             if not relevant_content:
-                print("🔧 Using first 3 chunks as fallback...")
                 relevant_content = chunks[:3]
-                print(f"✅ Using {len(relevant_content)} original chunks")
             
             if not relevant_content:
-                print("❌ All retrieval methods failed")
                 return None
                 
         except Exception as e:
-            print(f"❌ Content retrieval error: {e}")
             return None
-        
-        # 🔧 DEBUG: Show what we're sending to quiz generation
-        print(f"🔧 DEBUG: Content for quiz generation:")
-        for i, content in enumerate(relevant_content[:2]):
-            print(f"   Chunk {i+1}: {content[:100]}...")
         
         # Generate quiz
         quiz = self.generate_quiz(relevant_content, num_questions, languages=languages)
         
         return quiz
-
-
-# Test complete pipeline
-if __name__ == "__main__":
-    generator = PDFQuizGenerator()
-    quiz = generator.process_pdf_to_quiz("sample.pdf", num_questions=2, languages=["japanese"])
-    
-    if quiz:
-        print("\n" + "=" * 50)
-        print("📝 COMPLETE LANGCHAIN QUIZ")
-        print("=" * 50)
-        print(quiz)
-        print("\n" + "=" * 50)
-        print("✅ LangChain integration complete!")
-    else:
-        print("❌ Failed to generate quiz")
