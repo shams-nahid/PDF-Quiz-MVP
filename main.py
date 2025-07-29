@@ -30,20 +30,28 @@ LANGUAGE_PROMPTS = {
     - Only one correct answer per question
     - Focus on key concepts and important facts
     - Vary difficulty levels
-    - Include the correct answer
 
     Content:
     {content}
 
-    Format your response as:
-    Question 1: [question text]
-    A) [option]
-    B) [option]
-    C) [option]
-    D) [option]
-    Correct Answer: [letter]
+    IMPORTANT: Return your response as valid JSON in this exact format:
+    {{
+    "questions": [
+        {{
+        "id": 1,
+        "question": "Your question text here?",
+        "options": {{
+            "A": "Option A text",
+            "B": "Option B text", 
+            "C": "Option C text",
+            "D": "Option D text"
+        }},
+        "correct_answer": "A"
+        }}
+    ]
+    }}
 
-    [Continue for all questions]""",
+    Return ONLY the JSON, no other text.""",
 
     "japanese": """あなたは専門のクイズ作成者です。以下の英語の内容を理解し、完全に日本語で選択式問題を作成してください。
 
@@ -221,7 +229,16 @@ class PDFQuizGenerator:
                 
                 # Generate quiz for this language
                 response = llm.invoke(formatted_prompt)
-                results[language] = response.content
+
+                # Parse JSON response for English
+                if language == "english":
+                    import json
+                    try:
+                        results[language] = json.loads(response.content)
+                    except:
+                        results[language] = response.content  # Fallback to original text
+                else:
+                    results[language] = response.content
             
             return {"quizzes": results}
             
