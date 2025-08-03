@@ -21,6 +21,10 @@ ALLOWED_FILE_TYPES = ['.pdf']
 class QuizRequest(BaseModel):
     num_questions: int = 2  # Default to 2 if not provided
 
+class QuizAnalysisRequest(BaseModel):
+    quiz_results: dict
+    pdf_content: str
+
 @app.post("/generate-quiz")
 async def generate_quiz(
     file: UploadFile = File(..., description="PDF file to generate quiz from"),
@@ -251,6 +255,30 @@ async def generate_quiz_json(
                 os.unlink(temp_file_path)
             except OSError:
                 pass  # File cleanup failed, but don't crash the response
+
+@app.post("/analyze-quiz-performance")
+async def analyze_quiz_performance(request: QuizAnalysisRequest):
+    """
+    Analyze user's quiz performance and provide insights
+    """
+    try:
+        # Initialize the PDF quiz generator
+        generator = PDFQuizGenerator()
+        
+        # Get analysis from the generator
+        analysis = generator.analyze_quiz_performance(
+            quiz_results=request.quiz_results,
+            pdf_content=request.pdf_content
+        )
+        
+        # Return the analysis
+        return {
+            "success": True,
+            "analysis": analysis
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 
 @app.get("/health")

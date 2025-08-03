@@ -313,3 +313,54 @@ class PDFQuizGenerator:
         quiz = self.generate_quiz(relevant_content, num_questions, languages=languages)
         
         return quiz
+
+    def analyze_quiz_performance(self, quiz_results, pdf_content):
+        """
+        Analyze user's quiz performance and provide feedback
+        """
+        try:
+            # Set up OpenAI client
+            llm = ChatOpenAI(
+                model="gpt-3.5-turbo",
+                temperature=0.3,
+                api_key=os.getenv("OPENAI_API_KEY")
+            )
+            
+            # Create analysis prompt
+            analysis_prompt = f"""You are an educational analyst. Analyze this student's quiz performance and provide feedback.
+
+                PDF Content Context:
+                {pdf_content[:2000]}...
+
+                Quiz Results:
+                Topic: {quiz_results['topic']}
+                Total Questions: {quiz_results['total_questions']}
+                Score: {quiz_results['score']}
+
+                Student Answers:
+                {quiz_results['user_answers']}
+
+                Please provide analysis in this JSON format:
+                {{
+                "overall_performance": "Brief assessment of performance",
+                "strong_areas": ["list", "of", "strong", "topics"],
+                "weak_areas": ["list", "of", "weak", "topics"],
+                "recommendations": ["specific", "study", "suggestions"]
+                }}
+
+                Focus on identifying knowledge gaps and providing actionable study recommendations."""
+
+            # Get analysis from OpenAI
+            response = llm.invoke(analysis_prompt)
+            
+            # Try to parse JSON response
+            import json
+            try:
+                analysis = json.loads(response.content)
+                return analysis
+            except:
+                # Fallback to text response if JSON parsing fails
+                return {"analysis_text": response.content}
+                
+        except Exception as e:
+            raise Exception(f"Analysis failed: {str(e)}")
