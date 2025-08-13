@@ -6,6 +6,8 @@ from main import PDFQuizGenerator
 from typing import List
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
+from db import test_connection
+
 
 # Create FastAPI app instance
 app = FastAPI(title="PDF Quiz Generator API", version="1.0.0")
@@ -286,6 +288,11 @@ async def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "message": "PDF Quiz Generator API is running"}
 
+
+@app.get("/test-db")
+def test_database():
+    success = test_connection()
+    return {"database_connected": success}
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):

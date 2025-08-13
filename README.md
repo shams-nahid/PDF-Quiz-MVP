@@ -191,3 +191,9 @@ print('All imports successful!')
 ## License
 
 MIT License - see project documentation for details.
+
+Install package like
+
+```
+pipenv install "pymongo[srv]==3.11"
+```
