@@ -192,8 +192,16 @@ print('All imports successful!')
 
 MIT License - see project documentation for details.
 
+## Troubleshoot
+
 Install package like
 
 ```
 pipenv install "pymongo[srv]==3.11"
+```
+
+Sync pipfile and requirements file before deploy to render platform
+
+```
+pipenv requirements > requirements.txt
 ```
