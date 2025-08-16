@@ -17,6 +17,13 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import timedelta
 from fastapi.middleware.cors import CORSMiddleware
+import requests
+import base64
+from dotenv import load_dotenv
+
+load_dotenv()
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+GITHUB_REPO = os.getenv("GITHUB_REPO")
 
 class UserRegistration(BaseModel):
     name: str
@@ -63,6 +70,31 @@ def create_access_token(data: dict, expires_delta: timedelta = None):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def upload_to_github(content, filename, user_id):
+    # Create path in repo
+    file_path = f"uploads/{user_id}/{filename}"
+    
+    # GitHub API URL
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{file_path}"
+    
+    # Encode file content
+    content_encoded = base64.b64encode(content).decode()
+    
+    # Upload
+    response = requests.put(url, 
+        headers={"Authorization": f"Bearer {GITHUB_TOKEN}"},
+        json={
+            "message": f"Upload {filename}",
+            "content": content_encoded
+        }
+    )
+    
+    # Return the raw URL for downloading
+    if response.status_code == 201:
+        return f"https://raw.githubusercontent.com/{GITHUB_REPO}/main/{file_path}"
+    else:
+        raise Exception("Upload failed")
 
 class UserLogin(BaseModel):
     email: str
@@ -246,22 +278,23 @@ async def generate_quiz_json(
         db = get_database()
         upload_dir = f"uploads/{user_id}"
         os.makedirs(upload_dir, exist_ok=True)
-
-        # Generate unique filename to avoid conflicts
+        
+        # Upload to GitHub for permanent storage
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{timestamp}_{file.filename}"
-        file_path = os.path.join(upload_dir, filename)
+        github_url = upload_to_github(content, filename, user_id)
 
-        # Save PDF file permanently
-        with open(file_path, "wb") as buffer:
-            buffer.write(content)
+        # Create temporary file for processing
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+            temp_file.write(content)
+            temp_file_path = temp_file.name
 
         # Save PDF metadata to database
         pdf_data = {
             "user_id": ObjectId(user_id),
             "filename": filename,
             "original_name": file.filename,
-            "file_path": file_path,
+            "file_path": github_url,
             "file_size": len(content),
             "uploaded_at": datetime.now(),
             "status": "processing"
@@ -269,9 +302,6 @@ async def generate_quiz_json(
 
         pdf_result = db.pdfs.insert_one(pdf_data)
         pdf_id = pdf_result.inserted_id
-
-        # Use the permanent file path for processing
-        temp_file_path = file_path
         
         # Initialize PDF quiz generator
         generator = PDFQuizGenerator()
