@@ -40,8 +40,9 @@ class QuizRequest(BaseModel):
     num_questions: int = 2  # Default to 2 if not provided
 
 class QuizAnalysisRequest(BaseModel):
-    quiz_results: dict
-    pdf_content: str
+    quiz_id: str
+    user_id: str
+    user_answers: List[dict]
 
 @app.post("/generate-quiz")
 async def generate_quiz(
@@ -328,24 +329,93 @@ async def analyze_quiz_performance(request: QuizAnalysisRequest):
     Analyze user's quiz performance and provide insights
     """
     try:
-        # Initialize the PDF quiz generator
+        db = get_database()
+        
+        # Fetch quiz from database
+        quiz = db.quizzes.find_one({"_id": ObjectId(request.quiz_id)})
+        if not quiz:
+            raise HTTPException(status_code=404, detail="Quiz not found")
+        
+        # Fetch PDF for context
+        pdf = db.pdfs.find_one({"_id": quiz["pdf_id"]})
+        if not pdf:
+            raise HTTPException(status_code=404, detail="PDF not found")
+        
+        # Compare answers and calculate score
+        quiz_questions = quiz["questions"]
+        correct_count = 0
+        user_results = []
+        
+        for user_answer in request.user_answers:
+            question_num = user_answer["question_number"]
+            user_ans = user_answer["user_answer"]
+            
+            # Find the corresponding question
+            question = next((q for q in quiz_questions if q.get("id") == question_num), None)
+            if question:
+                correct_ans = question.get("correct_answer")
+                is_correct = user_ans == correct_ans and user_ans != "skipped"
+                
+                if is_correct:
+                    correct_count += 1
+                
+                user_results.append({
+                    "question_number": question_num,
+                    "question": question.get("question"),
+                    "correct_answer": correct_ans,
+                    "user_answer": user_ans,
+                    "status": "correct" if is_correct else ("skipped" if user_ans == "skipped" else "incorrect")
+                })
+        
+        # Calculate score
+        total_questions = len(quiz_questions)
+        score_percentage = round((correct_count / total_questions) * 100) if total_questions > 0 else 0
+        
+        # Generate AI analysis (using existing generator)
         generator = PDFQuizGenerator()
         
-        # Get analysis from the generator
-        analysis = generator.analyze_quiz_performance(
-            quiz_results=request.quiz_results,
-            pdf_content=request.pdf_content
-        )
-        
-        # Return the analysis
-        return {
-            "success": True,
-            "analysis": analysis
+        # Create quiz_results format for the AI analysis
+        ai_quiz_results = {
+            "topic": pdf["original_name"],
+            "total_questions": total_questions,
+            "user_answers": user_results,
+            "score": f"{score_percentage}%"
         }
         
+        # Read PDF content for analysis context
+        with open(pdf["file_path"], "rb") as file:
+            # Simple text extraction - you might want to improve this
+            pdf_content = f"Content from {pdf['original_name']}"  # Simplified for now
+        
+        analysis = generator.analyze_quiz_performance(
+            quiz_results=ai_quiz_results,
+            pdf_content=pdf_content
+        )
+        
+        # Save analysis to database
+        analysis_data = {
+            "user_id": ObjectId(request.user_id),
+            "quiz_id": ObjectId(request.quiz_id),
+            "pdf_id": quiz["pdf_id"],
+            "user_answers": user_results,
+            "score": f"{score_percentage}%",
+            "analysis": analysis,
+            "completed_at": datetime.now()
+        }
+        
+        analysis_result = db.analysis.insert_one(analysis_data)
+        
+        return {
+            "success": True,
+            "analysis": analysis,
+            "score": f"{score_percentage}%",
+            "analysis_id": str(analysis_result.inserted_id)
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
-
 
 @app.get("/health")
 async def health_check():
