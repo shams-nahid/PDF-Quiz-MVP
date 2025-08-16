@@ -16,6 +16,7 @@ from bson import ObjectId
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from datetime import timedelta
+from fastapi.middleware.cors import CORSMiddleware
 
 class UserRegistration(BaseModel):
     name: str
@@ -30,6 +31,13 @@ def hash_password(password: str):
 
 # Create FastAPI app instance
 app = FastAPI(title="PDF Quiz Generator API", version="1.0.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 templates = Jinja2Templates(directory="templates")
 
 # Configuration constants
@@ -530,6 +538,169 @@ def login_user(user: UserLogin):
         raise HTTPException(
             status_code=500, 
             detail=f"Login failed: {str(e)}"
+        )
+
+@app.get("/user-pdfs/{user_id}")
+def get_user_pdfs(user_id: str):
+    """
+    Get all PDFs for a specific user
+    """
+    try:
+        db = get_database()
+        
+        # Validate user_id format
+        try:
+            user_object_id = ObjectId(user_id)
+        except:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid user ID format"
+            )
+        
+        # Check if user exists
+        user = db.users.find_one({"_id": user_object_id})
+        if not user:
+            raise HTTPException(
+                status_code=404, 
+                detail="User not found"
+            )
+        
+        # Get all PDFs for the user
+        pdfs = list(db.pdfs.find(
+            {"user_id": user_object_id},
+            {"file_path": 0}  # Exclude file_path for security
+        ).sort("uploaded_at", -1))  # Most recent first
+        
+        # Format the response
+        pdf_list = []
+        for pdf in pdfs:
+            pdf_list.append({
+                "pdf_id": str(pdf["_id"]),
+                "original_name": pdf.get("original_name", "Unknown"),
+                "file_size": pdf.get("file_size", 0),
+                "uploaded_at": pdf.get("uploaded_at").isoformat() if pdf.get("uploaded_at") else None,
+                "status": pdf.get("status", "unknown")
+            })
+        
+        return {
+            "success": True,
+            "pdfs": pdf_list,
+            "total": len(pdf_list)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to retrieve PDFs: {str(e)}"
+        )
+
+@app.get("/pdf-quiz-history/{pdf_id}")
+def get_pdf_quiz_history(pdf_id: str):
+    """
+    Get quiz questions, user answers, and analysis for a specific PDF
+    """
+    try:
+        db = get_database()
+        
+        # Validate pdf_id format
+        try:
+            pdf_object_id = ObjectId(pdf_id)
+        except:
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid PDF ID format"
+            )
+        
+        # Get PDF info
+        pdf = db.pdfs.find_one({"_id": pdf_object_id})
+        if not pdf:
+            raise HTTPException(
+                status_code=404, 
+                detail="PDF not found"
+            )
+        
+        # Get quiz for this PDF
+        quiz = db.quizzes.find_one({"pdf_id": pdf_object_id})
+        if not quiz:
+            raise HTTPException(
+                status_code=404, 
+                detail="No quiz found for this PDF"
+            )
+        
+        # Get analysis/user answers for this PDF
+        analysis = db.analysis.find_one(
+            {"pdf_id": pdf_object_id},
+            sort=[("completed_at", -1)]  # Get most recent attempt
+        )
+        
+        if not analysis:
+            # Quiz exists but not taken yet
+            return {
+                "success": True,
+                "pdf_info": {
+                    "pdf_id": str(pdf["_id"]),
+                    "original_name": pdf.get("original_name"),
+                    "uploaded_at": pdf.get("uploaded_at").isoformat() if pdf.get("uploaded_at") else None
+                },
+                "quiz_taken": False,
+                "questions": [
+                    {
+                        "id": q.get("id"),
+                        "question": q.get("question"),
+                        "options": q.get("options"),
+                        "correct_answer": q.get("correct_answer")
+                    }
+                    for q in quiz.get("questions", [])
+                ],
+                "message": "Quiz generated but not taken yet"
+            }
+        
+        # Format the complete quiz history
+        quiz_history = []
+        quiz_questions = quiz.get("questions", [])
+        user_answers_dict = {ans["question_number"]: ans for ans in analysis.get("user_answers", [])}
+        
+        for question in quiz_questions:
+            q_id = question.get("id")
+            user_answer_data = user_answers_dict.get(q_id, {})
+            
+            quiz_history.append({
+                "question_number": q_id,
+                "question": question.get("question"),
+                "options": question.get("options"),
+                "correct_answer": question.get("correct_answer"),
+                "user_answer": user_answer_data.get("user_answer"),
+                "status": user_answer_data.get("status"),
+                "is_correct": user_answer_data.get("status") == "correct"
+            })
+        
+        return {
+            "success": True,
+            "pdf_info": {
+                "pdf_id": str(pdf["_id"]),
+                "original_name": pdf.get("original_name"),
+                "uploaded_at": pdf.get("uploaded_at").isoformat() if pdf.get("uploaded_at") else None
+            },
+            "quiz_taken": True,
+            "quiz_history": quiz_history,
+            "analysis": {
+                "score": analysis.get("score"),
+                "overall_performance": analysis.get("analysis", {}).get("overall_performance"),
+                "strong_areas": analysis.get("analysis", {}).get("strong_areas", []),
+                "weak_areas": analysis.get("analysis", {}).get("weak_areas", []),
+                "recommendations": analysis.get("analysis", {}).get("recommendations", []),
+                "completed_at": analysis.get("completed_at").isoformat() if analysis.get("completed_at") else None
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to retrieve quiz history: {str(e)}"
         )
 
 @app.get("/", response_class=HTMLResponse)
