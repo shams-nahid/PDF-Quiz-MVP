@@ -13,6 +13,9 @@ from db import get_database
 import shutil
 from datetime import datetime
 from bson import ObjectId
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from datetime import timedelta
 
 class UserRegistration(BaseModel):
     name: str
@@ -34,6 +37,28 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 MIN_QUESTIONS = 1
 MAX_QUESTIONS = 10
 ALLOWED_FILE_TYPES = ['.pdf']
+
+# JWT Configuration
+SECRET_KEY = "your-secret-key-here-make-it-long-and-random"  # Change this!
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def create_access_token(data: dict, expires_delta: timedelta = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+class UserLogin(BaseModel):
+    email: str
+    password: str
 
 # Request model for accepting parameters (keeping for future use)
 class QuizRequest(BaseModel):
@@ -458,7 +483,55 @@ def register_user(user: UserRegistration):
         
     except Exception as e:
         return {"success": False, "message": f"Registration failed: {str(e)}"}
-    
+
+@app.post("/login")
+def login_user(user: UserLogin):
+    try:
+        db = get_database()
+        users_collection = db.users
+        
+        # Find user by email
+        db_user = users_collection.find_one({"email": user.email})
+        if not db_user:
+            raise HTTPException(
+                status_code=401, 
+                detail="Invalid email or password"
+            )
+        
+        # Verify password
+        if not verify_password(user.password, db_user["password"]):
+            raise HTTPException(
+                status_code=401, 
+                detail="Invalid email or password"
+            )
+        
+        # Create access token
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            data={"sub": str(db_user["_id"]), "email": db_user["email"]},
+            expires_delta=access_token_expires
+        )
+        
+        return {
+            "success": True,
+            "message": "Login successful",
+            "access_token": access_token,
+            "token_type": "bearer",
+            "user": {
+                "user_id": str(db_user["_id"]),
+                "name": db_user["name"],
+                "email": db_user["email"]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Login failed: {str(e)}"
+        )
+
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
