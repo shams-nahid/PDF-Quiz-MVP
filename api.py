@@ -7,6 +7,19 @@ from typing import List
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from db import test_connection
+from passlib.context import CryptContext
+from pydantic import BaseModel
+from db import get_database
+
+class UserRegistration(BaseModel):
+    name: str
+    email: str
+    password: str
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def hash_password(password: str):
+    return pwd_context.hash(password)
 
 
 # Create FastAPI app instance
@@ -294,6 +307,37 @@ def test_database():
     success = test_connection()
     return {"database_connected": success}
 
+@app.post("/register")
+def register_user(user: UserRegistration):
+    try:
+        db = get_database()
+        users_collection = db.users
+        
+        # Check if email already exists
+        if users_collection.find_one({"email": user.email}):
+            return {"success": False, "message": "Email already registered"}
+        
+        # Hash password and create user
+        hashed_password = hash_password(user.password)
+        
+        user_data = {
+            "name": user.name,
+            "email": user.email,
+            "password": hashed_password,
+            "created_at": "2025-08-16"  # You can use datetime.now() later
+        }
+        
+        result = users_collection.insert_one(user_data)
+        
+        return {
+            "success": True, 
+            "message": "User registered successfully",
+            "user_id": str(result.inserted_id)
+        }
+        
+    except Exception as e:
+        return {"success": False, "message": f"Registration failed: {str(e)}"}
+    
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})

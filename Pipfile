@@ -17,6 +17,7 @@ uvicorn = "*"
 python-multipart = "*"
 jinja2 = "*"
 pymongo = {extras = ["srv"], version = "==3.11"}
+passlib = {extras = ["bcrypt"], version = "*"}
 
 [dev-packages]
 
