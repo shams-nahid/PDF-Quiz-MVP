@@ -10,6 +10,9 @@ from db import test_connection
 from passlib.context import CryptContext
 from pydantic import BaseModel
 from db import get_database
+import shutil
+from datetime import datetime
+from bson import ObjectId
 
 class UserRegistration(BaseModel):
     name: str
@@ -158,6 +161,7 @@ async def generate_quiz(
 @app.post("/generate-quiz-json")
 async def generate_quiz_json(
     file: UploadFile = File(..., description="PDF file to generate quiz from"),
+    user_id: str = Form(..., description="User ID who is uploading"),
     num_questions: int = Form(2, description="Number of questions to generate (1-10)"),
     languages: List[str] = Form(["english", "japanese"], description="Languages for quiz generation (english, japanese)")
 ):
@@ -204,10 +208,36 @@ async def generate_quiz_json(
                 detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB"
             )
         
-        # Create temporary file to save uploaded PDF
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
-            temp_file.write(content)
-            temp_file_path = temp_file.name
+        # Create permanent file storage
+        db = get_database()
+        upload_dir = f"uploads/{user_id}"
+        os.makedirs(upload_dir, exist_ok=True)
+
+        # Generate unique filename to avoid conflicts
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{timestamp}_{file.filename}"
+        file_path = os.path.join(upload_dir, filename)
+
+        # Save PDF file permanently
+        with open(file_path, "wb") as buffer:
+            buffer.write(content)
+
+        # Save PDF metadata to database
+        pdf_data = {
+            "user_id": ObjectId(user_id),
+            "filename": filename,
+            "original_name": file.filename,
+            "file_path": file_path,
+            "file_size": len(content),
+            "uploaded_at": datetime.now(),
+            "status": "processing"
+        }
+
+        pdf_result = db.pdfs.insert_one(pdf_data)
+        pdf_id = pdf_result.inserted_id
+
+        # Use the permanent file path for processing
+        temp_file_path = file_path
         
         # Initialize PDF quiz generator
         generator = PDFQuizGenerator()
@@ -222,9 +252,27 @@ async def generate_quiz_json(
             )
         
         if quiz_result and "quizzes" in quiz_result and "english" in quiz_result["quizzes"]:
+            # Save quiz to database
+            quiz_data = {
+                "pdf_id": pdf_id,
+                "user_id": ObjectId(user_id),
+                "questions": quiz_result["quizzes"]["english"]["questions"],
+                "quiz_settings": {
+                    "total_questions": num_questions,
+                    "language": "english",
+                    "generated_at": datetime.now(),
+                    "source_filename": file.filename
+                }
+            }
+            
+            quiz_save_result = db.quizzes.insert_one(quiz_data)
+            quiz_id = quiz_save_result.inserted_id
+            
             return {
                 "success": True,
                 "questions": quiz_result["quizzes"]["english"]["questions"],
+                "quiz_id": str(quiz_id),
+                "pdf_id": str(pdf_id),
                 "metadata": {
                     "source_filename": file.filename,
                     "file_size_bytes": len(content),
@@ -264,12 +312,15 @@ async def generate_quiz_json(
             )
     
     finally:
-        # Clean up temporary file
-        if temp_file_path and os.path.exists(temp_file_path):
+        # Update PDF status to ready (don't delete the file)
+        if 'pdf_id' in locals():
             try:
-                os.unlink(temp_file_path)
-            except OSError:
-                pass  # File cleanup failed, but don't crash the response
+                db.pdfs.update_one(
+                    {"_id": pdf_id}, 
+                    {"$set": {"status": "ready"}}
+                )
+            except:
+                pass
 
 @app.post("/analyze-quiz-performance")
 async def analyze_quiz_performance(request: QuizAnalysisRequest):
