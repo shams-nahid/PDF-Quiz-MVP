@@ -404,6 +404,22 @@ async def analyze_quiz_performance(request: QuizAnalysisRequest):
         if not pdf:
             raise HTTPException(status_code=404, detail="PDF not found")
         
+        # Get the GitHub URL from the database
+        github_url = pdf.get("file_path")
+        if not github_url:
+            raise HTTPException(status_code=404, detail="PDF file path not found")
+        
+        # Download the PDF file from GitHub
+        try:
+            response = requests.get(github_url, timeout=30)
+            response.raise_for_status()
+            pdf_content = response.content
+        except requests.RequestException as e:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Failed to download PDF from storage: {str(e)}"
+            )
+        
         # Compare answers and calculate score
         quiz_questions = quiz["questions"]
         correct_count = 0
@@ -444,11 +460,6 @@ async def analyze_quiz_performance(request: QuizAnalysisRequest):
             "user_answers": user_results,
             "score": f"{score_percentage}%"
         }
-        
-        # Read PDF content for analysis context
-        with open(pdf["file_path"], "rb") as file:
-            # Simple text extraction - you might want to improve this
-            pdf_content = f"Content from {pdf['original_name']}"  # Simplified for now
         
         analysis = generator.analyze_quiz_performance(
             quiz_results=ai_quiz_results,
