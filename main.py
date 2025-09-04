@@ -20,7 +20,7 @@ import time
 # Load environment variables
 load_dotenv()
 
-# Add this after your imports, before the class definition
+# Add this after  imports, before the class definition
 LANGUAGE_PROMPTS = {
     "english": """You are an expert quiz creator. Generate multiple-choice questions from the following content.
 
@@ -171,11 +171,11 @@ class PDFQuizGenerator:
         except Exception as e:
             return None
 
-    # Update your retrieve_relevant_content method (if you're still using it)
+    # Update retrieve_relevant_content method (if you're still using it)
     def retrieve_relevant_content(self, query="important concepts key facts", top_k=3, namespace=None):
         """Retrieve most relevant chunks for quiz generation using LangChain with namespace isolation"""
         try:
-            # FIX: Use text-embedding-ada-002 to match your Pinecone index
+            # FIX: Use text-embedding-ada-002 to match  Pinecone index
             embeddings_model = OpenAIEmbeddings(model="text-embedding-ada-002")
             
             # Get index name from environment variable
@@ -245,7 +245,6 @@ class PDFQuizGenerator:
         except Exception as e:
             return None
 
-    # Replace your process_pdf_to_quiz method with this debug version
     def process_pdf_to_quiz(self, pdf_path, num_questions=5, languages=["japanese"]):
         """Complete pipeline: PDF to Quiz using LangChain with namespace isolation"""
         
